@@ -6,10 +6,8 @@ import SaaSScreen from './components/SaaSScreen';
 import ClientesScreen from './components/ClientesScreen';
 import BottomNav, { type Screen } from './components/BottomNav';
 
-// Ajustado para tu estructura de carpetas
 import { client } from '../lib/turso'; 
 
-// Interfaces de tipos
 import type { Work, WorkStatus } from './components/TrabajosScreen';
 import type { SaaSApp } from './components/SaaSScreen';
 import type { Client } from './components/ClientesScreen';
@@ -34,18 +32,16 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState<Screen | 'saas'>('dashboard');
   const [loading, setLoading] = useState(true);
   
-  // Estados inicializados vacíos para JPCFIX
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [works, setWorks] = useState<Work[]>([]);
   const [saasApps, setSaasApps] = useState<SaaSApp[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [gastosFijos, setGastosFijos] = useState<GastoFijo[]>([]);
 
-  // --- CARGAR DATOS DESDE TURSO ---
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // 1. Cargar Caja
+      // 1. Caja
       const resCaja = await client.execute("SELECT * FROM caja ORDER BY fecha DESC");
       setTransactions(resCaja.rows.map(row => ({
         id: row.id!.toString(),
@@ -56,10 +52,9 @@ export default function App() {
         date: new Date(row.fecha as string)
       })));
 
-      // 2. Cargar Servicios (Trabajos y SaaS)
+      // 2. Servicios
       const resServicios = await client.execute("SELECT * FROM servicios ORDER BY fecha_ingreso DESC");
       
-      // Trabajos técnicos (es_suscripcion = 0)
       setWorks(resServicios.rows.filter(r => Number(r.es_suscripcion) === 0).map(row => ({
         id: row.id!.toString(),
         client: row.cliente as string,
@@ -69,7 +64,6 @@ export default function App() {
         createdAt: new Date(row.fecha_ingreso as string || Date.now())
       })));
 
-      // Apps SaaS (es_suscripcion = 1)
       setSaasApps(resServicios.rows.filter(r => Number(r.es_suscripcion) === 1).map(row => ({
         id: row.id!.toString(),
         appName: row.equipo_o_app as string,
@@ -90,7 +84,7 @@ export default function App() {
       })));
 
     } catch (error) {
-      console.error("DEBUG JPCFIX -> Error Turso:", error);
+      console.error("Error Turso:", error);
     } finally {
       setLoading(false);
     }
@@ -100,7 +94,7 @@ export default function App() {
     fetchData();
   }, [fetchData]);
 
-  // --- ACCIONES DE ESCRITURA ---
+  // --- ACCIONES ---
   const addTransaction = async (transaction: Omit<Transaction, 'id' | 'date'>) => {
     try {
       await client.execute({
@@ -108,10 +102,7 @@ export default function App() {
         args: [transaction.amount, transaction.type, transaction.paymentMethod || null, transaction.description]
       });
       fetchData();
-    } catch (e) { 
-      console.error(e);
-      alert("Error en Caja. Verificá conexión."); 
-    }
+    } catch (e) { alert("Error en Caja"); }
   };
 
   const addWork = async (work: Omit<Work, 'id' | 'createdAt'>) => {
@@ -121,10 +112,7 @@ export default function App() {
         args: [work.client, work.device, work.description, work.status]
       });
       fetchData();
-    } catch (e) { 
-      console.error(e);
-      alert("Error al guardar trabajo."); 
-    }
+    } catch (e) { alert("Error al guardar trabajo"); }
   };
 
   const updateWorkStatus = async (id: string, status: WorkStatus) => {
@@ -143,33 +131,35 @@ export default function App() {
     fetchData();
   };
 
-  // --- CÁLCULOS DE BALANCE ---
-  const cashBalance = transactions
+  // --- CÁLCULOS PARA DASHBOARD ---
+  const cashTotal = transactions
     .filter(t => t.paymentMethod === 'cash')
     .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
 
-  const transferBalance = transactions
+  const transferTotal = transactions
     .filter(t => t.paymentMethod === 'transfer')
     .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
 
-  const totalGastosFijos = gastosFijos.reduce((sum, g) => sum + g.monto, 0);
-  
-  const balanceFinal = (cashBalance + transferBalance) - totalGastosFijos;
+  const totalFijos = gastosFijos.reduce((sum, g) => sum + g.monto, 0);
+  const balanceFinal = (cashTotal + transferTotal) - totalFijos;
 
-  if (loading) return (
-    <div className="size-full bg-[#0f172a] flex flex-col items-center justify-center text-white font-sans">
-      <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-blue-500 mb-4"></div>
-      <p className="text-slate-400">Sincronizando JPCFIX...</p>
-    </div>
-  );
+  // ESTADÍSTICAS PARA EL RESUMEN RÁPIDO
+  const statsReales = {
+    activos: works.filter(w => w.status === 'in_progress').length,
+    pendientes: works.filter(w => w.status === 'ready').length,
+    repuestos: works.filter(w => w.status === 'waiting_parts').length
+  };
+
+  if (loading) return <div className="size-full bg-[#0f172a] flex items-center justify-center text-white font-sans">Cargando JPCFIX...</div>;
 
   return (
     <div className="size-full bg-[#0f172a] font-sans">
       {activeScreen === 'dashboard' && (
         <Dashboard
           balance={balanceFinal}
-          todayIncome={cashBalance} 
-          todayExpenses={transferBalance} 
+          todayIncome={cashTotal} 
+          todayExpenses={transferTotal} 
+          stats={statsReales} // Pasamos los números calculados
           onNewWork={() => setActiveScreen('trabajos')}
           onNewExpense={() => setActiveScreen('caja')}
           onNavigateToSaaS={() => setActiveScreen('saas')}
@@ -198,10 +188,7 @@ export default function App() {
 
       {activeScreen === 'saas' && (
         <div className="fixed top-4 left-4 z-50">
-          <button 
-            onClick={() => setActiveScreen('dashboard')} 
-            className="bg-[#1e293b] text-white px-4 py-2 rounded-lg border border-slate-700 shadow-xl active:scale-95 transition-transform"
-          >
+          <button onClick={() => setActiveScreen('dashboard')} className="bg-[#1e293b] text-white px-4 py-2 rounded-lg border border-slate-700 shadow-xl">
             ← Volver
           </button>
         </div>
