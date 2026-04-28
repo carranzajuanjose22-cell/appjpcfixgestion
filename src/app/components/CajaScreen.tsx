@@ -1,10 +1,14 @@
-import { useState } from 'react';
-import { DollarSign, CreditCard, Wallet, Plus, Minus, TrendingUp, TrendingDown, Calendar } from 'lucide-react';
+import React, { useState } from 'react';
+import { DollarSign, CreditCard, Wallet, Plus, Minus, TrendingUp, TrendingDown, Calendar, Trash2 } from 'lucide-react';
 
 interface Transaction {
   id: string;
   type: 'income' | 'expense';
   amount: number;
+  grossAmount?: number;
+  discountAmount?: number;
+  netAmount?: number;
+  discountRate?: number;
   paymentMethod?: 'cash' | 'transfer';
   description: string;
   date: Date;
@@ -20,9 +24,10 @@ interface CajaScreenProps {
   transactions: Transaction[];
   onAddTransaction: (transaction: Omit<Transaction, 'id' | 'date'>) => void;
   onAddGastoFijo: (gasto: GastoFijo) => void; // Nueva prop agregada
+  onDeleteTransaction: (id: string) => void;
 }
 
-export default function CajaScreen({ transactions, onAddTransaction, onAddGastoFijo }: CajaScreenProps) {
+export default function CajaScreen({ transactions, onAddTransaction, onAddGastoFijo, onDeleteTransaction }: CajaScreenProps) {
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'income' | 'expense' | 'fixed'>('income');
   const [amount, setAmount] = useState('');
@@ -30,21 +35,41 @@ export default function CajaScreen({ transactions, onAddTransaction, onAddGastoF
   const [description, setDescription] = useState('');
   const [dueDay, setDueDay] = useState('10');
 
-  // Cálculos de Balance (Se mantienen igual para consistencia visual)
+  const getIncomeBreakdown = (transaction: Transaction) => {
+    const gross = typeof transaction.grossAmount === 'number' ? transaction.grossAmount : transaction.amount;
+    const discount = typeof transaction.discountAmount === 'number'
+      ? transaction.discountAmount
+      : Number((gross * 0.3).toFixed(2));
+    const net = typeof transaction.netAmount === 'number'
+      ? transaction.netAmount
+      : Number((gross - discount).toFixed(2));
+
+    return { gross, discount, net };
+  };
+
+  // Cálculos de Balance (ingresos netos con descuento de insumos)
   const totalCash = transactions
     .filter(t => t.type === 'income' && t.paymentMethod === 'cash')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + getIncomeBreakdown(t).net, 0);
 
   const totalTransfer = transactions
     .filter(t => t.type === 'income' && t.paymentMethod === 'transfer')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + getIncomeBreakdown(t).net, 0);
+
+  const totalBrutoIngresos = transactions
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + getIncomeBreakdown(t).gross, 0);
+
+  const totalDescuentosInsumos = transactions
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + getIncomeBreakdown(t).discount, 0);
 
   const totalExpenses = transactions
     .filter(t => t.type === 'expense')
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const totalIncome = totalCash + totalTransfer;
-  const balance = totalIncome - totalExpenses;
+  const totalIncomeNeto = totalCash + totalTransfer;
+  const balance = totalIncomeNeto - totalExpenses;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,7 +107,7 @@ export default function CajaScreen({ transactions, onAddTransaction, onAddGastoF
         <div className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] rounded-2xl p-6 mb-6 border border-slate-700/50 shadow-xl">
           <div className="flex items-center gap-2 mb-2 text-slate-400">
             <Wallet size={18} />
-            <p className="text-sm">Balance Operativo</p>
+            <p className="text-sm">Balance Operativo (Neto)</p>
           </div>
           <h2 className={`text-4xl font-bold mb-4 ${balance >= 0 ? 'text-[#10b981]' : 'text-red-400'}`}>
             ${balance.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -90,11 +115,11 @@ export default function CajaScreen({ transactions, onAddTransaction, onAddGastoF
         </div>
 
         {/* Totales Grid */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-2 gap-3 mb-6">
           <div className="bg-[#1e293b] rounded-xl p-3 border border-slate-700/50">
             <div className="flex items-center gap-1.5 mb-1 text-[#10b981]">
               <DollarSign size={14} />
-              <p className="text-xs font-medium">Efectivo</p>
+              <p className="text-xs font-medium">Efectivo Neto</p>
             </div>
             <p className="text-white font-bold text-sm">${totalCash.toLocaleString('es-AR')}</p>
           </div>
@@ -102,9 +127,17 @@ export default function CajaScreen({ transactions, onAddTransaction, onAddGastoF
           <div className="bg-[#1e293b] rounded-xl p-3 border border-slate-700/50">
             <div className="flex items-center gap-1.5 mb-1 text-[#3b82f6]">
               <CreditCard size={14} />
-              <p className="text-xs font-medium">Transf.</p>
+              <p className="text-xs font-medium">Transf. Neta</p>
             </div>
             <p className="text-white font-bold text-sm">${totalTransfer.toLocaleString('es-AR')}</p>
+          </div>
+
+          <div className="bg-[#1e293b] rounded-xl p-3 border border-slate-700/50 text-purple-300">
+            <div className="flex items-center gap-1.5 mb-1">
+              <TrendingDown size={14} />
+              <p className="text-xs font-medium">Insumos (30%)</p>
+            </div>
+            <p className="text-white font-bold text-sm">${totalDescuentosInsumos.toLocaleString('es-AR')}</p>
           </div>
 
           <div className="bg-[#1e293b] rounded-xl p-3 border border-slate-700/50 text-red-400">
@@ -113,6 +146,15 @@ export default function CajaScreen({ transactions, onAddTransaction, onAddGastoF
               <p className="text-xs font-medium">Gastos</p>
             </div>
             <p className="text-white font-bold text-sm">${totalExpenses.toLocaleString('es-AR')}</p>
+          </div>
+        </div>
+
+        <div className="bg-[#1e293b] rounded-xl p-3 border border-slate-700/50 mb-6">
+          <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Resumen de ingresos</p>
+          <div className="flex flex-col gap-1 text-sm">
+            <p className="text-white">Total bruto: <span className="font-bold">${totalBrutoIngresos.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></p>
+            <p className="text-purple-300">Descuento insumos (30%): <span className="font-bold">${totalDescuentosInsumos.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></p>
+            <p className="text-[#10b981]">Ingreso neto final: <span className="font-bold">${totalIncomeNeto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span></p>
           </div>
         </div>
 
@@ -148,7 +190,9 @@ export default function CajaScreen({ transactions, onAddTransaction, onAddGastoF
             <TrendingUp size={18} className="text-slate-400" /> Movimientos
           </h3>
           <div className="space-y-3 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
-            {transactions.slice().reverse().map((transaction) => (
+            {transactions.slice().reverse().map((transaction) => {
+              const breakdown = transaction.type === 'income' ? getIncomeBreakdown(transaction) : null;
+              return (
               <div key={transaction.id} className="bg-[#0f172a] rounded-xl p-3 border border-slate-700/30">
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-3">
@@ -165,18 +209,46 @@ export default function CajaScreen({ transactions, onAddTransaction, onAddGastoF
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className={`font-bold text-sm ${transaction.type === 'income' ? 'text-[#10b981]' : 'text-red-400'}`}>
-                      {transaction.type === 'income' ? '+' : '-'}${transaction.amount.toLocaleString('es-AR')}
-                    </p>
+                    {transaction.type === 'income' && breakdown ? (
+                      <div className="space-y-0.5">
+                        <p className="font-bold text-sm text-slate-200">
+                          Total: ${breakdown.gross.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </p>
+                        <p className="font-bold text-xs text-purple-300">
+                          Insumos ({Math.round(transaction.discountRate ?? 30)}%): -${breakdown.discount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </p>
+                        <p className="font-bold text-sm text-[#10b981]">
+                          Neto: +${breakdown.net.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="font-bold text-sm text-red-400">
+                        -${transaction.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </p>
+                    )}
                     {transaction.paymentMethod && (
                       <span className="text-[9px] uppercase tracking-wider text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">
                         {transaction.paymentMethod === 'cash' ? 'Efectivo' : 'Transf.'}
                       </span>
                     )}
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm('¿Seguro que querés eliminar este movimiento?')) {
+                            onDeleteTransaction(transaction.id);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-red-300 hover:bg-red-500/20"
+                      >
+                        <Trash2 size={12} />
+                        Eliminar
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            ))}
+            )})}
           </div>
         </div>
       </div>
@@ -234,6 +306,9 @@ export default function CajaScreen({ transactions, onAddTransaction, onAddGastoF
                       <span className="text-xs font-bold">Transferencia</span>
                     </button>
                   </div>
+                  <p className="mt-2 text-[11px] text-purple-300">
+                    A cada ingreso se le descuenta automáticamente un 30% para insumos.
+                  </p>
                 </div>
               )}
 
